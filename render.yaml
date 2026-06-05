@@ -10,7 +10,7 @@ services:
       - key: NODE_ENV
         value: production
       - key: FRONTEND_URL
-        value: https://creator-video-frontend.onrender.com
+        value: https://creator-video-intelligence-platform-1.onrender.com
       - key: GOOGLE_API_KEY
         sync: false
       - key: QDRANT_URL
