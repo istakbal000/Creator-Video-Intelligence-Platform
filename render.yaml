@@ -27,7 +27,7 @@ services:
     staticPublishPath: ./dist
     envVars:
       - key: VITE_API_URL
-        value: https://creator-video-backend.onrender.com
+        value: https://creator-video-intelligence-platform.onrender.com/api
     routes:
       - type: rewrite
         source: /*

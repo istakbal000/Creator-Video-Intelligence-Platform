@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: import.meta.env.VITE_API_URL || 'https://creator-video-intelligence-platform.onrender.com/api',
   timeout: 120000, // 2 min — video analysis can take time
   headers: {
     'Content-Type': 'application/json',
