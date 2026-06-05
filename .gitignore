@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+.model-cache/
+
+# Environment
+.env
+.env.local
+.env.production
+
+# Logs
+logs/
+*.log
+
+# Temp files
+tmp/
+*.mp3
+*.wav
+*.m4a
+
+# Build output
+dist/
+build/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Qdrant local storage
+qdrant_storage/
