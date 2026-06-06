@@ -6,13 +6,14 @@
  * Requires: ffmpeg installed and in PATH
  */
 
-import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import { spawnWithTimeout } from '../../utils/validators.js';
 import logger from '../../utils/logger.js';
 
-const WHISPER_MODEL = process.env.WHISPER_MODEL || 'base';
-const TEMP_DIR = process.env.TEMP_DIR || './tmp';
+const WHISPER_MODEL   = process.env.WHISPER_MODEL || 'base';
+const TEMP_DIR        = process.env.TEMP_DIR || './tmp';
+const WHISPER_TIMEOUT = 120_000; // 120 s wall-clock limit
 
 /**
  * Transcribes an audio file using Whisper CLI.
@@ -28,62 +29,57 @@ export async function transcribeWithWhisper(audioFilePath) {
     fs.mkdirSync(TEMP_DIR, { recursive: true });
   }
 
-  return new Promise((resolve, reject) => {
-    const outputDir = path.dirname(audioFilePath);
+  const outputDir = path.dirname(audioFilePath);
 
-    // whisper <file> --model base --output_format txt --output_dir <dir>
-    const whisperProcess = spawn('whisper', [
-      audioFilePath,
-      '--model', WHISPER_MODEL,
-      '--output_format', 'txt',
-      '--output_dir', outputDir,
-      '--fp16', 'False', // Disable FP16 for CPU-only systems
-      '--language', 'en',
-    ]);
+  const args = [
+    audioFilePath,
+    '--model', WHISPER_MODEL,
+    '--output_format', 'txt',
+    '--output_dir', outputDir,
+    '--fp16', 'False', // Disable FP16 for CPU-only systems
+    '--language', 'en',
+  ];
 
-    let stderr = '';
+  const { promise } = spawnWithTimeout('whisper', args, WHISPER_TIMEOUT);
 
-    whisperProcess.stderr.on('data', (data) => {
-      stderr += data.toString();
-      logger.debug(`[Whisper stderr] ${data.toString().trim()}`);
-    });
+  let result;
+  try {
+    result = await promise;
+  } catch (err) {
+    // Covers both timeout and spawn failures
+    if (err.message.includes('timed out')) {
+      throw new Error(`Whisper transcription timed out after ${WHISPER_TIMEOUT / 1000}s`);
+    }
+    throw new Error(
+      `Whisper is not installed or not in PATH. Install with: pip install openai-whisper. ` +
+      `Original error: ${err.message}`
+    );
+  }
 
-    whisperProcess.on('close', (code) => {
-      if (code !== 0) {
-        logger.error(`[Whisper] Process exited with code ${code}: ${stderr}`);
-        reject(new Error(`Whisper transcription failed: ${stderr}`));
-        return;
-      }
+  const { code, stderr } = result;
 
-      // Whisper outputs <filename>.txt in the same directory
-      const baseName = path.basename(audioFilePath, path.extname(audioFilePath));
-      const txtPath = path.join(outputDir, `${baseName}.txt`);
+  if (code !== 0) {
+    logger.error(`[Whisper] Process exited with code ${code}: ${stderr}`);
+    throw new Error(`Whisper transcription failed (exit ${code}): ${stderr.slice(0, 400)}`);
+  }
 
-      if (!fs.existsSync(txtPath)) {
-        reject(new Error(`Whisper output file not found: ${txtPath}`));
-        return;
-      }
+  // Whisper outputs <filename>.txt in the same directory
+  const baseName = path.basename(audioFilePath, path.extname(audioFilePath));
+  const txtPath  = path.join(outputDir, `${baseName}.txt`);
 
-      const transcript = fs.readFileSync(txtPath, 'utf-8').trim();
-      logger.info(`[Whisper] Transcription complete. Length: ${transcript.length} chars`);
+  if (!fs.existsSync(txtPath)) {
+    throw new Error(`Whisper output file not found: ${txtPath}`);
+  }
 
-      // Cleanup transcript file
-      try {
-        fs.unlinkSync(txtPath);
-      } catch (e) {
-        logger.warn(`[Whisper] Could not delete temp file: ${txtPath}`);
-      }
+  const transcript = fs.readFileSync(txtPath, 'utf-8').trim();
+  logger.info(`[Whisper] Transcription complete. Length: ${transcript.length} chars`);
 
-      resolve(transcript);
-    });
+  // Cleanup transcript file
+  try {
+    fs.unlinkSync(txtPath);
+  } catch (e) {
+    logger.warn(`[Whisper] Could not delete temp file: ${txtPath}`);
+  }
 
-    whisperProcess.on('error', (err) => {
-      logger.error('[Whisper] Failed to start process:', err);
-      reject(
-        new Error(
-          'Whisper is not installed or not in PATH. Install with: pip install openai-whisper'
-        )
-      );
-    });
-  });
+  return transcript;
 }

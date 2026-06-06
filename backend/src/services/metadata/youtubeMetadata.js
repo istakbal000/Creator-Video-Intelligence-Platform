@@ -6,11 +6,12 @@
  *           upload date, hashtags, thumbnail URL.
  */
 
-import { spawn } from 'child_process';
 import { metadataCacheStore, cacheKey } from '../../utils/cache.js';
+import { normalizeYouTubeUrl, spawnWithTimeout } from '../../utils/validators.js';
 import logger from '../../utils/logger.js';
 
-const YTDLP_PATH = process.env.YTDLP_PATH || 'yt-dlp';
+const YTDLP_PATH        = process.env.YTDLP_PATH || 'yt-dlp';
+const METADATA_TIMEOUT  = 60_000; // 60 s
 
 /**
  * Fetches metadata for a YouTube video.
@@ -19,17 +20,20 @@ const YTDLP_PATH = process.env.YTDLP_PATH || 'yt-dlp';
  * @returns {Promise<Object>}
  */
 export async function getYouTubeMetadata(url) {
-  const key = cacheKey(`metadata:${url}`);
+  // Normalise Shorts/youtu.be to canonical watch URL before any operation
+  const canonicalUrl = normalizeYouTubeUrl(url);
+
+  const key    = cacheKey(`metadata:${canonicalUrl}`);
   const cached = metadataCacheStore.get(key);
   if (cached) {
-    logger.info(`[YouTube Metadata] Cache hit for: ${url}`);
+    logger.info(`[YouTube Metadata] Cache hit for: ${canonicalUrl}`);
     return cached;
   }
 
-  logger.info(`[YouTube Metadata] Fetching metadata for: ${url}`);
+  logger.info(`[YouTube Metadata] Fetching metadata for: ${canonicalUrl}`);
 
-  const rawInfo = await fetchYtdlpInfo(url);
-  const metadata = parseYouTubeInfo(rawInfo, url);
+  const rawInfo  = await fetchYtdlpInfo(canonicalUrl);
+  const metadata = parseYouTubeInfo(rawInfo, url); // keep original url in result
 
   metadataCacheStore.set(key, metadata);
   logger.info(`[YouTube Metadata] Fetched: "${metadata.title}" by ${metadata.creator}`);
@@ -43,37 +47,27 @@ export async function getYouTubeMetadata(url) {
  * @returns {Promise<Object>}
  */
 async function fetchYtdlpInfo(url) {
-  return new Promise((resolve, reject) => {
-    const ytdlp = spawn(YTDLP_PATH, [
-      url,
-      '--dump-json',
-      '--no-playlist',
-      '--socket-timeout', '30',
-      '--skip-download',
-    ]);
+  const args = [
+    url,
+    '--dump-json',
+    '--no-playlist',
+    '--socket-timeout', '30',
+    '--retries', '3',
+    '--skip-download',
+  ];
 
-    let stdout = '';
-    let stderr = '';
+  const { promise } = spawnWithTimeout(YTDLP_PATH, args, METADATA_TIMEOUT);
+  const { code, stdout, stderr } = await promise;
 
-    ytdlp.stdout.on('data', (data) => { stdout += data.toString(); });
-    ytdlp.stderr.on('data', (data) => { stderr += data.toString(); });
+  if (code !== 0 || !stdout.trim()) {
+    throw new Error(`yt-dlp metadata fetch failed (code ${code}): ${stderr.slice(0, 400)}`);
+  }
 
-    ytdlp.on('close', (code) => {
-      if (code !== 0 || !stdout.trim()) {
-        reject(new Error(`yt-dlp metadata fetch failed (code ${code}): ${stderr}`));
-        return;
-      }
-      try {
-        resolve(JSON.parse(stdout.trim()));
-      } catch (e) {
-        reject(new Error(`Failed to parse yt-dlp output: ${e.message}`));
-      }
-    });
-
-    ytdlp.on('error', (err) => {
-      reject(new Error(`yt-dlp not found: ${err.message}`));
-    });
-  });
+  try {
+    return JSON.parse(stdout.trim());
+  } catch (e) {
+    throw new Error(`Failed to parse yt-dlp output: ${e.message}`);
+  }
 }
 
 /**

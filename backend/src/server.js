@@ -30,11 +30,11 @@ const tmpDir = process.env.TEMP_DIR || path.join(__dirname, '../tmp');
 const app = express();
 const httpServer = createServer(app);
 
-// Allowed origins: any localhost port + the deployed frontend URL
+// Build the explicit origin allowlist from env vars (e.g. FRONTEND_URL).
+// Note: localhost is NOT handled here — it is permitted via regex in corsOriginHandler below.
 const getAllowedOrigins = () => {
   const origins = [];
   if (process.env.FRONTEND_URL) origins.push(process.env.FRONTEND_URL);
-  // Always allow localhost for local dev
   return origins;
 };
 
@@ -42,9 +42,9 @@ const corsOriginHandler = (origin, callback) => {
   const allowedOrigins = getAllowedOrigins();
   // Allow requests with no origin (e.g. curl, Postman, same-origin)
   if (!origin) return callback(null, true);
-  // Allow any localhost port
+  // Allow any localhost port (local dev)
   if (/^http:\/\/localhost:\d+$/.test(origin)) return callback(null, true);
-  // Allow the deployed frontend
+  // Allow any explicitly configured origin (e.g. the deployed frontend URL)
   if (allowedOrigins.includes(origin)) return callback(null, true);
   callback(new Error(`CORS: origin '${origin}' not allowed`));
 };

@@ -6,11 +6,27 @@
  * We extract what's available without authentication.
  */
 
-import { spawn } from 'child_process';
 import { metadataCacheStore, cacheKey } from '../../utils/cache.js';
+import { spawnWithTimeout } from '../../utils/validators.js';
 import logger from '../../utils/logger.js';
 
-const YTDLP_PATH = process.env.YTDLP_PATH || 'yt-dlp';
+const YTDLP_PATH       = process.env.YTDLP_PATH || 'yt-dlp';
+const METADATA_TIMEOUT = 60_000; // 60 s
+
+/** Patterns that indicate Instagram auth / rate-limit blocks */
+const AUTH_PATTERNS = [
+  /login required/i,
+  /not logged in/i,
+  /HTTP Error 401/i,
+  /HTTP Error 403/i,
+  /please log in/i,
+  /requires authentication/i,
+  /rate.?limit/i,
+];
+
+function isAuthError(text) {
+  return AUTH_PATTERNS.some((re) => re.test(text));
+}
 
 /**
  * Fetches metadata for an Instagram Reel.
@@ -37,39 +53,35 @@ export async function getInstagramMetadata(url) {
 }
 
 async function fetchYtdlpInfo(url) {
-  return new Promise((resolve, reject) => {
-    const ytdlp = spawn(YTDLP_PATH, [
-      url,
-      '--dump-json',
-      '--no-playlist',
-      '--socket-timeout', '30',
-      '--skip-download',
-      // Use cookies if available for better metadata access
-      // '--cookies-from-browser', 'chrome', // uncomment if authenticated
-    ]);
+  const args = [
+    url,
+    '--dump-json',
+    '--no-playlist',
+    '--socket-timeout', '30',
+    '--retries', '3',
+    '--skip-download',
+  ];
 
-    let stdout = '';
-    let stderr = '';
+  const { promise } = spawnWithTimeout(YTDLP_PATH, args, METADATA_TIMEOUT);
+  const { code, stdout, stderr } = await promise;
 
-    ytdlp.stdout.on('data', (data) => { stdout += data.toString(); });
-    ytdlp.stderr.on('data', (data) => { stderr += data.toString(); });
+  // Detect auth blocks early and throw a descriptive message
+  if (isAuthError(stderr)) {
+    throw new Error(
+      `Instagram requires authentication (Login required / rate-limited). ` +
+      `Metadata fetch blocked by Instagram. Details: ${stderr.slice(0, 200)}`
+    );
+  }
 
-    ytdlp.on('close', (code) => {
-      if (code !== 0 || !stdout.trim()) {
-        reject(new Error(`yt-dlp Instagram fetch failed (code ${code}): ${stderr}`));
-        return;
-      }
-      try {
-        resolve(JSON.parse(stdout.trim()));
-      } catch (e) {
-        reject(new Error(`Failed to parse yt-dlp Instagram output: ${e.message}`));
-      }
-    });
+  if (code !== 0 || !stdout.trim()) {
+    throw new Error(`yt-dlp Instagram fetch failed (code ${code}): ${stderr.slice(0, 400)}`);
+  }
 
-    ytdlp.on('error', (err) => {
-      reject(new Error(`yt-dlp not found: ${err.message}`));
-    });
-  });
+  try {
+    return JSON.parse(stdout.trim());
+  } catch (e) {
+    throw new Error(`Failed to parse yt-dlp Instagram output: ${e.message}`);
+  }
 }
 
 function parseInstagramInfo(info, url) {
