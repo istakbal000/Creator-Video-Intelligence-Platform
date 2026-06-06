@@ -30,17 +30,29 @@ const tmpDir = process.env.TEMP_DIR || path.join(__dirname, '../tmp');
 const app = express();
 const httpServer = createServer(app);
 
+// Allowed origins: any localhost port + the deployed frontend URL
+const getAllowedOrigins = () => {
+  const origins = [];
+  if (process.env.FRONTEND_URL) origins.push(process.env.FRONTEND_URL);
+  // Always allow localhost for local dev
+  return origins;
+};
+
+const corsOriginHandler = (origin, callback) => {
+  const allowedOrigins = getAllowedOrigins();
+  // Allow requests with no origin (e.g. curl, Postman, same-origin)
+  if (!origin) return callback(null, true);
+  // Allow any localhost port
+  if (/^http:\/\/localhost:\d+$/.test(origin)) return callback(null, true);
+  // Allow the deployed frontend
+  if (allowedOrigins.includes(origin)) return callback(null, true);
+  callback(new Error(`CORS: origin '${origin}' not allowed`));
+};
+
 // Socket.IO
 const io = new Server(httpServer, {
   cors: {
-    origin: (origin, callback) => {
-      // Allow localhost with any port
-      if (!origin || /^http:\/\/localhost:\d+$/.test(origin)) {
-        callback(null, true);
-      } else {
-        callback(null, process.env.FRONTEND_URL || 'http://localhost:5173');
-      }
-    },
+    origin: corsOriginHandler,
     methods: ['GET', 'POST'],
     credentials: true,
   },
@@ -56,13 +68,7 @@ app.use(
 
 app.use(
   cors({
-    origin: (origin, callback) => {
-      if (!origin || /^http:\/\/localhost:\d+$/.test(origin)) {
-        callback(null, true);
-      } else {
-        callback(null, process.env.FRONTEND_URL || 'http://localhost:5173');
-      }
-    },
+    origin: corsOriginHandler,
     credentials: true,
   })
 );
