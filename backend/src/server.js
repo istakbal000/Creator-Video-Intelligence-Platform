@@ -33,8 +33,13 @@ const httpServer = createServer(app);
 // Build the explicit origin allowlist from env vars (e.g. FRONTEND_URL).
 // Note: localhost is NOT handled here — it is permitted via regex in corsOriginHandler below.
 const getAllowedOrigins = () => {
-  const origins = [];
-  if (process.env.FRONTEND_URL) origins.push(process.env.FRONTEND_URL);
+  const origins = [
+    // Hardcoded fallback to unblock the known Render deployment
+    'https://creator-video-intelligence-platform-1.onrender.com'
+  ];
+  if (process.env.FRONTEND_URL) {
+    origins.push(process.env.FRONTEND_URL.replace(/\/$/, ''));
+  }
   return origins;
 };
 
