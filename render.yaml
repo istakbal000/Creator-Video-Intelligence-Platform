@@ -28,6 +28,8 @@ services:
     envVars:
       - key: VITE_API_URL
         value: https://creator-video-intelligence-platform.onrender.com/api
+      - key: VITE_SOCKET_URL
+        value: https://creator-video-intelligence-platform.onrender.com
     routes:
       - type: rewrite
         source: /*

@@ -18,10 +18,14 @@ export function useChat(sessionId) {
   // Connect socket
   useEffect(() => {
     const socket = io(SOCKET_URL, {
-      transports: ['websocket', 'polling'],
+      // Start with polling so the HTTP upgrade path works on Render/proxies,
+      // then Socket.IO transparently upgrades to WebSocket.
+      transports: ['polling', 'websocket'],
       reconnection: true,
-      reconnectionAttempts: 5,
-      reconnectionDelay: 1000,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 2000,
+      reconnectionDelayMax: 10000,
+      timeout: 20000,
     });
 
     socketRef.current = socket;
