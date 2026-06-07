@@ -63,6 +63,10 @@ async function fetchYtdlpInfo(url) {
     '--extractor-args', 'instagram:api=api',
   ];
 
+  if (process.env.YTDLP_PROXY) {
+    args.push('--proxy', process.env.YTDLP_PROXY);
+  }
+
   const { promise } = spawnWithTimeout(YTDLP_PATH, args, METADATA_TIMEOUT);
   const { code, stdout, stderr } = await promise;
 
