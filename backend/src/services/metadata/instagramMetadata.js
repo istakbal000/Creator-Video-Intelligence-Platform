@@ -60,6 +60,7 @@ async function fetchYtdlpInfo(url) {
     '--socket-timeout', '30',
     '--retries', '3',
     '--skip-download',
+    '--extractor-args', 'instagram:api=api',
   ];
 
   const { promise } = spawnWithTimeout(YTDLP_PATH, args, METADATA_TIMEOUT);

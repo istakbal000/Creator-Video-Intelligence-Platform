@@ -105,6 +105,7 @@ async function fetchSubtitlesViaYtdlp(url) {
     '--fragment-retries', '3',
     '--output', outputTemplate,
     '--quiet',
+    '--extractor-args', 'youtube:player_client=ios,web_creator',
   ];
 
   const { promise } = spawnWithTimeout(YTDLP_PATH, args, SUBTITLE_TIMEOUT_MS);
@@ -222,6 +223,7 @@ export async function ytdlpWhisperFallback(url, cacheKeyValue, platform) {
     '--socket-timeout', '30',
     '--retries', '3',
     '--fragment-retries', '3',
+    '--extractor-args', 'youtube:player_client=ios,web_creator;instagram:api=api',
   ];
 
   const { promise } = spawnWithTimeout(YTDLP_PATH, args, AUDIO_TIMEOUT_MS);

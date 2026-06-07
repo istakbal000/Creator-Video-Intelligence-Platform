@@ -7,7 +7,7 @@
  */
 
 import { metadataCacheStore, cacheKey } from '../../utils/cache.js';
-import { normalizeYouTubeUrl, spawnWithTimeout } from '../../utils/validators.js';
+import { normalizeYouTubeUrl, spawnWithTimeout, extractYouTubeId } from '../../utils/validators.js';
 import logger from '../../utils/logger.js';
 
 const YTDLP_PATH        = process.env.YTDLP_PATH || 'yt-dlp';
@@ -32,8 +32,14 @@ export async function getYouTubeMetadata(url) {
 
   logger.info(`[YouTube Metadata] Fetching metadata for: ${canonicalUrl}`);
 
-  const rawInfo  = await fetchYtdlpInfo(canonicalUrl);
-  const metadata = parseYouTubeInfo(rawInfo, url); // keep original url in result
+  let metadata;
+  try {
+    const rawInfo  = await fetchYtdlpInfo(canonicalUrl);
+    metadata = parseYouTubeInfo(rawInfo, url); // keep original url in result
+  } catch (err) {
+    logger.warn(`[YouTube Metadata] yt-dlp failed: ${err.message}. Falling back to YouTube API...`);
+    metadata = await fetchYouTubeApiFallback(canonicalUrl, url);
+  }
 
   metadataCacheStore.set(key, metadata);
   logger.info(`[YouTube Metadata] Fetched: "${metadata.title}" by ${metadata.creator}`);
@@ -68,6 +74,67 @@ async function fetchYtdlpInfo(url) {
   } catch (e) {
     throw new Error(`Failed to parse yt-dlp output: ${e.message}`);
   }
+}
+
+/**
+ * Fallback to official YouTube Data API v3 when yt-dlp fails (e.g. HTTP 429).
+ *
+ * @param {string} canonicalUrl
+ * @param {string} originalUrl
+ * @returns {Promise<Object>}
+ */
+async function fetchYouTubeApiFallback(canonicalUrl, originalUrl) {
+  const apiKey = process.env.GOOGLE_API_KEY;
+  if (!apiKey) {
+    throw new Error('No GOOGLE_API_KEY available for YouTube API fallback');
+  }
+  
+  const videoId = extractYouTubeId(canonicalUrl);
+  if (!videoId) {
+    throw new Error('Could not extract video ID for YouTube API fallback');
+  }
+
+  const apiUrl = `https://www.googleapis.com/youtube/v3/videos?part=statistics,snippet,contentDetails&id=${videoId}&key=${apiKey}`;
+  const response = await fetch(apiUrl);
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`YouTube API failed with status ${response.status}: ${errText}`);
+  }
+  const data = await response.json();
+  
+  if (!data.items || data.items.length === 0) {
+    throw new Error('Video not found via YouTube API');
+  }
+
+  const item = data.items[0];
+  const stats = item.statistics || {};
+  const snippet = item.snippet || {};
+
+  const views = parseInt(stats.viewCount || '0', 10);
+  const likes = parseInt(stats.likeCount || '0', 10);
+  const comments = parseInt(stats.commentCount || '0', 10);
+  const engagementRate = views > 0 ? (((likes + comments) / views) * 100).toFixed(4) : '0.0000';
+
+  return {
+    platform: 'youtube',
+    url: originalUrl,
+    videoId: videoId,
+    title: snippet.title || 'Untitled',
+    creator: snippet.channelTitle || 'Unknown Creator',
+    channelUrl: null,
+    views,
+    likes,
+    comments,
+    duration: 0, // Fallback placeholder
+    durationFormatted: 'N/A', 
+    uploadDate: snippet.publishedAt ? snippet.publishedAt.split('T')[0] : 'Unknown',
+    hashtags: extractHashtags(snippet.description || '', snippet.tags || []),
+    thumbnailUrl: snippet.thumbnails?.high?.url || snippet.thumbnails?.default?.url || null,
+    description: (snippet.description || '').slice(0, 500),
+    engagementRate: parseFloat(engagementRate),
+    followerCount: 'unavailable',
+    language: snippet.defaultLanguage || 'en',
+  };
 }
 
 /**
